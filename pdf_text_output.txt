@@ -1,0 +1,12 @@
+ 
+Tech Ops Mobility  iPad Pin Change 1. Open Settings and click on Touch ID and Passcode.  
+ 2. Enter the device’s Current Passcode.  
+ 3. Select  Change Passcode. 
+ 
+
+ 
+Tech Ops Mobility 4. Enter your Old/Current Passcode. 
+ 5. Enter your New/Desired Passcode and click Next. NOTE: This can be either numeric or alpha numeric by clicking Passcode Options. 
+ 6. Enter the New Passcode again to verify and click Done. 
+  
+
