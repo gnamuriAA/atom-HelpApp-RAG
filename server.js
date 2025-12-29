@@ -12,8 +12,8 @@ app.use(express.json());
 // Load embeddings data
 console.log('Loading embeddings data...');
 const data = JSON.parse(fs.readFileSync('embeddings_data.json', 'utf-8'));
-const { chunks, embeddings, vocabulary, idf_values } = data;
-console.log(`✓ Loaded ${chunks.length} chunks successfully!\n`);
+const { chunks, chunks_with_metadata, embeddings, vocabulary, idf_values, pdf_files } = data;
+console.log(`✓ Loaded ${chunks.length} chunks from ${pdf_files ? pdf_files.length : 1} PDF(s)!\n`);
 
 // Utility: Calculate cosine similarity
 function cosineSimilarity(vecA, vecB) {
@@ -100,7 +100,10 @@ app.post('/query', (req, res) => {
     const results = indices.map((item, rank) => ({
       rank: rank + 1,
       score: item.score,
-      text: chunks[item.idx]
+      text: chunks[item.idx],
+      source: chunks_with_metadata && chunks_with_metadata[item.idx] 
+        ? chunks_with_metadata[item.idx].source 
+        : 'unknown'
     }));
     
     res.json({

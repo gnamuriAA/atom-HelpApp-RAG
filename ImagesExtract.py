@@ -2,6 +2,7 @@ import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 import io
+import os
 from HelpPDFReader import extract_text
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -27,10 +28,34 @@ def extract_images_with_ocr(pdf_path):
 
     return ocr_text
 
-# Extract text using both methods
-text_content = extract_text("pin_change.pdf")
-ocr_text = extract_images_with_ocr("pin_change.pdf")
-final_corpus = text_content + "\n\n" + ocr_text
+def process_pdf(pdf_path):
+    """Process a single PDF and return combined text"""
+    text_content = extract_text(pdf_path)
+    ocr_text = extract_images_with_ocr(pdf_path)
+    return text_content + "\n\n" + ocr_text
+
+# List of PDF files to process
+pdf_files = [
+    "pin_change.pdf",
+    "ipad-accessories.pdf"
+    # Add your new PDF here, e.g., "another_document.pdf"
+]
+
+# Process all PDFs
+all_documents = []
+for pdf_file in pdf_files:
+    if os.path.exists(pdf_file):
+        print(f"Processing: {pdf_file}")
+        text = process_pdf(pdf_file)
+        all_documents.append({
+            'source': pdf_file,
+            'text': text
+        })
+    else:
+        print(f"Warning: {pdf_file} not found, skipping...")
+
+# Combine all text
+final_corpus = "\n\n--- NEW DOCUMENT ---\n\n".join([doc['text'] for doc in all_documents])
 
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=800,
@@ -38,6 +63,21 @@ splitter = RecursiveCharacterTextSplitter(
 )
 
 chunks = splitter.split_text(final_corpus)
+
+# Add metadata to chunks (track which PDF each chunk came from)
+chunks_with_metadata = []
+for chunk in chunks:
+    # Determine source document
+    source = "unknown"
+    for doc in all_documents:
+        if chunk in doc['text']:
+            source = doc['source']
+            break
+    
+    chunks_with_metadata.append({
+        'text': chunk,
+        'source': source
+    })
 
 # Simple local embedding using TF-IDF (no download needed)
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -52,9 +92,15 @@ embeddings = vectorizer.fit_transform(chunks).toarray()
 # Save chunks and embeddings for later use
 data_to_save = {
     'chunks': chunks,
+    'chunks_with_metadata': chunks_with_metadata,
     'embeddings': embeddings,
-    'vectorizer': vectorizer
+    'vectorizer': vectorizer,
+    'pdf_files': pdf_files
 }
+
+print(f"\nProcessed {len(pdf_files)} PDF(s)")
+print(f"Generated {len(chunks)} chunks")
+print(f"Saved to embeddings_data.pkl")
 
 with open('embeddings_data.pkl', 'wb') as f:
     pickle.dump(data_to_save, f)
