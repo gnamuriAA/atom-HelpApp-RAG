@@ -10,9 +10,8 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json());
 
-// In-memory cache for embeddings
+// In-memory cache
 let cachedData = null;
-let productDatabase = null;
 let lastProcessedTime = null;
 
 // Utility: Calculate cosine similarity
@@ -57,64 +56,7 @@ function transformQuery(queryText, vocabulary, idf_values) {
   return vector;
 }
 
-// Extract structured product information from text
-function extractProductInfo(text) {
-  const products = [];
-  
-  // Pattern: Find price ($XX.XX) followed by part number
-  const pricePartRegex = /\$(\d+\.\d+)\s+([A-Z0-9/-]+(?:AM\/A|LL\/A)?)/g;
-  let match;
-  
-  while ((match = pricePartRegex.exec(text)) !== null) {
-    const price = match[1];
-    const partNumber = match[2];
-    const matchPosition = match.index;
-    
-    // Get context before (300 chars) to find description
-    const contextStart = Math.max(0, matchPosition - 300);
-    const contextBefore = text.substring(contextStart, matchPosition);
-    
-    // Extract description and name
-    const lines = contextBefore.split('\n').map(l => l.trim()).filter(l => l);
-    let description = null;
-    let name = null;
-    
-    // Look backwards for description
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      
-      // Skip table headers
-      if (line.includes('DESCRIPTION') || line.includes('PRICE') || line.includes('PART NUMBER')) {
-        continue;
-      }
-      
-      // First substantial line is description
-      if (!description && line.length > 10) {
-        description = line;
-      }
-      
-      // ALL CAPS lines before description are product names
-      if (line === line.toUpperCase() && line.length > 10 && /[A-Z]/.test(line)) {
-        name = line;
-        break;
-      }
-    }
-    
-    if (description) {
-      products.push({
-        name: name || description.substring(0, 60),
-        description,
-        price: `$${price}`,
-        part_number: partNumber,
-        searchText: `${name || ''} ${description} ${partNumber}`.toLowerCase()
-      });
-    }
-  }
-  
-  return products;
-}
-
-// Search products by query
+// Search products by query (using pre-extracted catalog)
 function searchProducts(query, products) {
   const queryLower = query.toLowerCase();
   const queryWords = queryLower.split(/\W+/).filter(w => w.length > 2);
@@ -127,9 +69,12 @@ function searchProducts(query, products) {
   }
   
   // Score each product
-  const scored = products.map(product => {
+  let bestMatch = null;
+  let bestScore = 0;
+  
+  for (const product of products) {
     let score = 0;
-    const searchText = product.searchText;
+    const searchText = `${product.name} ${product.description} ${product.part_number}`.toLowerCase();
     
     queryWords.forEach(word => {
       if (searchText.includes(word)) {
@@ -137,22 +82,22 @@ function searchProducts(query, products) {
       }
     });
     
-    return { product, score };
-  });
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = product;
+    }
+  }
   
-  // Return best match
-  scored.sort((a, b) => b.score - a.score);
-  return scored[0] && scored[0].score > 0 ? scored[0].product : null;
+  return bestScore > 0 ? bestMatch : null;
 }
 
-// Format product response based on query intent
+// Format product response
 function formatProductResponse(product, query) {
   if (!product) return null;
   
   const queryLower = query.toLowerCase();
   const parts = [];
   
-  // Determine what user is asking for
   const askingPartNumber = queryLower.includes('part number') || queryLower.includes('part num');
   const askingPrice = queryLower.includes('price') || queryLower.includes('cost');
   
@@ -171,7 +116,7 @@ function formatProductResponse(product, query) {
   };
 }
 
-// Function to run Python script and wait for completion
+// Run Python script
 function runPythonScript(scriptName) {
   return new Promise((resolve, reject) => {
     console.log(`Running ${scriptName}...`);
@@ -199,10 +144,9 @@ function runPythonScript(scriptName) {
   });
 }
 
-// Function to process PDFs and load data
+// Process and load data
 async function processAndLoadData(forceReprocess = false) {
   try {
-    // Check if we need to reprocess
     const needsProcessing = forceReprocess || 
                            !fs.existsSync('embeddings_data.json') ||
                            !cachedData;
@@ -212,10 +156,7 @@ async function processAndLoadData(forceReprocess = false) {
       console.log('Processing PDFs and generating embeddings...');
       console.log('='.repeat(60));
       
-      // Step 1: Extract and process PDFs
       await runPythonScript('ImagesExtract.py');
-      
-      // Step 2: Export to JSON
       await runPythonScript('export_to_json.py');
       
       console.log('='.repeat(60));
@@ -223,18 +164,15 @@ async function processAndLoadData(forceReprocess = false) {
       console.log('='.repeat(60) + '\n');
     }
     
-    // Load the data
     console.log('Loading embeddings data...');
     const data = JSON.parse(fs.readFileSync('embeddings_data.json', 'utf-8'));
     cachedData = data;
     lastProcessedTime = new Date();
     
-    // Build product database from chunks
-    const allText = data.chunks.join('\n\n');
-    productDatabase = extractProductInfo(allText);
-    
     console.log(`✓ Loaded ${data.chunks.length} chunks from ${data.pdf_files ? data.pdf_files.length : 1} PDF(s)!`);
-    console.log(`✓ Extracted ${productDatabase.length} products from structured data\n`);
+    if (data.products) {
+      console.log(`✓ Loaded ${data.products.length} structured products\n`);
+    }
     
     return data;
   } catch (error) {
@@ -253,7 +191,8 @@ app.get('/health', async (req, res) => {
     res.json({
       status: 'healthy',
       chunks_loaded: cachedData.chunks.length,
-      products_extracted: productDatabase ? productDatabase.length : 0,
+      products_extracted: cachedData.products ? cachedData.products.length : 0,
+      vocabulary_size: cachedData.vocabulary ? cachedData.vocabulary.length : 0,
       last_processed: lastProcessedTime,
       pdf_files: cachedData.pdf_files || []
     });
@@ -265,7 +204,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Query endpoint - processes PDFs if needed
+// Smart query endpoint
 app.post('/query', async (req, res) => {
   try {
     const { query, top_k = 3, reprocess = false, use_structured = true } = req.body;
@@ -278,7 +217,7 @@ app.post('/query', async (req, res) => {
       return res.status(400).json({ error: 'top_k must be a positive integer' });
     }
     
-    // Process and load data if needed
+    // Load data if needed
     if (!cachedData || reprocess) {
       await processAndLoadData(reprocess);
     }
@@ -288,9 +227,9 @@ app.post('/query', async (req, res) => {
                           query.toLowerCase().includes('price') ||
                           query.toLowerCase().includes('cost');
     
-    if (isProductQuery && use_structured && productDatabase) {
-      // Use structured extraction
-      const product = searchProducts(query, productDatabase);
+    if (isProductQuery && use_structured && cachedData.products) {
+      // Use structured product catalog
+      const product = searchProducts(query, cachedData.products);
       
       if (product) {
         const response = formatProductResponse(product, query);
@@ -304,24 +243,19 @@ app.post('/query', async (req, res) => {
       }
     }
     
-    // Fallback to semantic search
+    // Fallback to semantic search with TF-IDF
     const { chunks, chunks_with_metadata, embeddings, vocabulary, idf_values } = cachedData;
-    
-    // Transform query to vector
     const queryVec = transformQuery(query, vocabulary, idf_values);
     
-    // Calculate similarities
     const similarities = embeddings.map(embedding => 
       cosineSimilarity(queryVec, embedding)
     );
     
-    // Get top k results
     const indices = similarities
       .map((score, idx) => ({ score, idx }))
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.min(top_k, chunks.length));
     
-    // Format results
     const results = indices.map((item, rank) => ({
       rank: rank + 1,
       score: item.score,
@@ -343,7 +277,23 @@ app.post('/query', async (req, res) => {
   }
 });
 
-// Force reprocess endpoint
+// Get products endpoint
+app.get('/products', async (req, res) => {
+  try {
+    if (!cachedData) {
+      await processAndLoadData();
+    }
+    
+    res.json({
+      total_products: cachedData.products ? cachedData.products.length : 0,
+      products: cachedData.products || []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Force reprocess
 app.post('/reprocess', async (req, res) => {
   try {
     console.log('\nForce reprocessing requested...');
@@ -353,7 +303,7 @@ app.post('/reprocess', async (req, res) => {
       status: 'success',
       message: 'PDFs reprocessed successfully',
       chunks: cachedData.chunks.length,
-      products: productDatabase.length,
+      products: cachedData.products ? cachedData.products.length : 0,
       processed_at: lastProcessedTime
     });
   } catch (error) {
@@ -361,22 +311,6 @@ app.post('/reprocess', async (req, res) => {
       status: 'error',
       error: error.message 
     });
-  }
-});
-
-// Get products endpoint
-app.get('/products', async (req, res) => {
-  try {
-    if (!cachedData) {
-      await processAndLoadData();
-    }
-    
-    res.json({
-      total_products: productDatabase ? productDatabase.length : 0,
-      products: productDatabase || []
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 });
 
@@ -424,7 +358,7 @@ app.get('/chunks/:id', async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('RAG API Server with Smart Product Extraction');
+  console.log('RAG API Server with Optimized Product Extraction');
   console.log('='.repeat(60));
   console.log('\nAvailable endpoints:');
   console.log(`  GET  http://localhost:${PORT}/health          - Health check`);
@@ -433,12 +367,10 @@ app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/reprocess       - Force reprocess PDFs`);
   console.log(`  GET  http://localhost:${PORT}/chunks          - Get all chunks`);
   console.log(`  GET  http://localhost:${PORT}/chunks/<id>     - Get specific chunk`);
-  console.log('\nQuery with auto-processing:');
+  console.log('\nExample queries:');
   console.log(`  curl -X POST http://localhost:${PORT}/query \\`);
   console.log('       -H "Content-Type: application/json" \\');
   console.log('       -d \'{"query": "What is the Part Number of APPLE USB-C POWER ADAPTER (GEN 10 iPAD, iPAD PRO)"}\'');
-  console.log('\nForce reprocess:');
-  console.log(`  curl -X POST http://localhost:${PORT}/reprocess`);
   console.log('\n' + '='.repeat(60));
   console.log(`\n✓ Server running on http://localhost:${PORT}\n`);
 });

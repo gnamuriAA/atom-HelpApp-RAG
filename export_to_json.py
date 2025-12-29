@@ -16,7 +16,8 @@ export_data = {
     'embeddings': data['embeddings'].tolist(),  # Convert numpy array to list
     'vocabulary': data['vectorizer'].get_feature_names_out().tolist(),
     'idf_values': data['vectorizer'].idf_.tolist(),
-    'pdf_files': data.get('pdf_files', [])
+    'pdf_files': data.get('pdf_files', []),
+    'products': data.get('products', [])  # Add product catalog
 }
 
 # Save as JSON
@@ -27,4 +28,5 @@ print("✓ Exported embeddings to embeddings_data.json")
 print(f"  - {len(export_data['chunks'])} chunks")
 print(f"  - {len(export_data['embeddings'])} embeddings")
 print(f"  - {len(export_data['vocabulary'])} vocabulary terms")
+print(f"  - {len(export_data.get('products', []))} structured products")
 print(f"  - {len(export_data['pdf_files'])} PDF files")

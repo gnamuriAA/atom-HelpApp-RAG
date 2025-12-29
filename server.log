@@ -1,0 +1,55 @@
+============================================================
+RAG API Server with Optimized Product Extraction
+============================================================
+
+Available endpoints:
+  GET  http://localhost:3001/health          - Health check
+  POST http://localhost:3001/query           - Smart query (structured + semantic)
+  GET  http://localhost:3001/products        - Get all extracted products
+  POST http://localhost:3001/reprocess       - Force reprocess PDFs
+  GET  http://localhost:3001/chunks          - Get all chunks
+  GET  http://localhost:3001/chunks/<id>     - Get specific chunk
+
+Example queries:
+  curl -X POST http://localhost:3001/query \
+       -H "Content-Type: application/json" \
+       -d '{"query": "What is the Part Number of APPLE USB-C POWER ADAPTER (GEN 10 iPAD, iPAD PRO)"}'
+
+============================================================
+
+✓ Server running on http://localhost:3001
+
+
+============================================================
+Processing PDFs and generating embeddings...
+============================================================
+Running ImagesExtract.py...
+Warning: pin_change.pdf not found, skipping...
+Processing: ipad-accessories.pdf
+
+Generating optimized TF-IDF embeddings...
+Extracting product catalog...
+Extracted 2 products
+
+Processed 2 PDF(s)
+Generated 7 chunks
+Extracted 2 structured products
+Embedding dimensions: 501
+Saved to embeddings_data.pkl
+
+Running export_to_json.py...
+✓ Exported embeddings to embeddings_data.json
+  - 7 chunks
+  - 7 embeddings
+  - 501 vocabulary terms
+  - 2 structured products
+  - 2 PDF files
+
+============================================================
+Processing complete!
+============================================================
+
+Loading embeddings data...
+✓ Loaded 7 chunks from 2 PDF(s)!
+✓ Loaded 2 structured products
+
